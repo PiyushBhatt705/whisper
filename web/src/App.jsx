@@ -4,7 +4,7 @@ import { SignedIn, SignedOut, SignInButton, SignUpButton, UserButton } from '@cl
 function App() {
   return (
     <>
-    <h1>Hello World!</h1>
+    
       <SignedOut>
         <SignInButton mode="modal" />
       </SignedOut>
