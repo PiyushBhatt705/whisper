@@ -17,10 +17,13 @@ const AuthSync = () => {
                     onSuccess: (data) => {
                         console.log("✅ User synced with backend: ", data.name);
                     },
-                    onError:(data) =>{
-                        console.log("❌ User sync failed for user: ", data.name);
-                        
-                    }
+                    onError: (error: any) => {
+            console.log("❌ User sync failed:", error);
+            if (error?.response) {
+              console.log("Error response data:", error.response.data);
+              console.log("Error status:", error.response.status);
+            }
+          },
                 })
         if(!isSignedIn){
             hasSynced.current=false

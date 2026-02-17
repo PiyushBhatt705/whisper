@@ -1,40 +1,57 @@
 import axios from "axios";
+import * as Sentry from "@sentry/react-native";
 import { useAuth } from "@clerk/clerk-expo";
-import { useEffect } from "react";
+import { useCallback } from "react";
 
 const API_URL = "https://whisper-uyi4.onrender.com";
 
+// this is the same thing we did with useEffect setup but it's optimized version - it's better!!
+
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    "Content-Type": "application/json", 
-  },
+  headers: { "Content-Type": "application/json" },
 });
+
+// Response interceptor registered once
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response) {
+      Sentry.logger.error(
+        Sentry.logger
+          .fmt`API request failed: ${error.config?.method?.toUpperCase()} ${error.config?.url}`,
+        {
+          status: error.response.status,
+          endpoint: error.config?.url,
+          method: error.config?.method,
+        },
+      );
+    } else if (error.request) {
+      Sentry.logger.warn("API request failed - no response", {
+        endpoint: error.config?.url,
+        method: error.config?.method,
+      });
+    }
+    return Promise.reject(error);
+  },
+);
 
 export const useApi = () => {
   const { getToken } = useAuth();
 
-  useEffect(() => {
-    const requestInterceptors = api.interceptors.request.use(async (config) => {
-      const tocken = await getToken();
+  const apiWithAuth = useCallback(
+    async <T>(config: Parameters<typeof api.request>[0]) => {
+      const token = await getToken();
+      return api.request<T>({
+        ...config,
+        headers: {
+          ...config.headers,
+          ...(token && { Authorization: `Bearer ${token}` }),
+        },
+      });
+    },
+    [getToken],
+  );
 
-      if (tocken) {
-        config.headers.Authorization = `Bearer ${tocken}`;
-      }
-      return config;
-    })
-
-
-    const resposneInterceptor = api.interceptors.response.use((response) => response, (error) =>{
-      //log api error to senatry
-      if(error.response){
-        
-      } else if(error.request){}
-    })
-
-    return () => {
-      api.interceptors.request.eject(requestInterceptors)
-    }
-  }, [getToken]);
-  return api
+  return { api, apiWithAuth };
 };
