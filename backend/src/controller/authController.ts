@@ -49,3 +49,4 @@ export async function authCallback(req: Request, res: Response, next: NextFuncti
         next(error)
     }
 }
+

@@ -22,6 +22,19 @@ export const useApi = () => {
         config.headers.Authorization = `Bearer ${tocken}`;
       }
       return config;
-    });
-  });
+    })
+
+
+    const resposneInterceptor = api.interceptors.response.use((response) => response, (error) =>{
+      //log api error to senatry
+      if(error.response){
+        
+      } else if(error.request){}
+    })
+
+    return () => {
+      api.interceptors.request.eject(requestInterceptors)
+    }
+  }, [getToken]);
+  return api
 };
