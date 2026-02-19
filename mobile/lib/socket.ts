@@ -4,13 +4,14 @@ import { QueryClient } from "@tanstack/react-query";
 import { Chat, Message, MessageSender } from "@/types";
 import * as Sentry from "@sentry/react-native";
 
+// UPDATED: Your Render URL
 const SOCKET_URL = "https://whisper-uyi4.onrender.com";
 
 interface SocketState {
   socket: Socket | null;
   isConnected: boolean;
   onlineUsers: Set<string>;
-  typingUsers: Map<string, string>; // chatId -> userId
+  typingUsers: Map<string, string>;
   unreadChats: Set<string>;
   currentChatId: string | null;
   queryClient: QueryClient | null;
@@ -42,16 +43,19 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
     if (existingSocket) existingSocket.disconnect();
 
-    // Force websocket transport to bypass proxy issues on cloud hosting
+    // FIXED FOR RENDER: Forced WebSocket and increased reconnection logic
     const socket = io(SOCKET_URL, {
       auth: { token },
       transports: ["websocket"],
       upgrade: false,
-      reconnectionAttempts: 5,
+      reconnection: true,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 1000,
+      timeout: 20000,
     });
 
     socket.on("connect", () => {
-      console.log("✅ Socket connected, id:", socket.id);
+      console.log("✅ Socket connected to Render, id:", socket.id);
       Sentry.logger.info("Socket connected", { socketId: socket.id });
       set({ isConnected: true });
     });
@@ -62,7 +66,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     });
 
     socket.on("disconnect", (reason) => {
-      console.log("ℹ️ Socket disconnected:", reason);
+      console.log("ℹ️ Socket disconnect:", reason);
       set({ isConnected: false });
     });
 
@@ -85,23 +89,24 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     });
 
     socket.on("socket-error", (error: { message: string }) => {
-      console.error("⚠️ Server-side socket error:", error.message);
+      console.error("Server Socket Error:", error.message);
     });
 
     socket.on("new-message", (message: Message) => {
       const { queryClient, currentChatId } = get();
       if (!queryClient) return;
 
-      // 1. Update Message List
+      const senderId = (message.sender as MessageSender)._id;
+
+      // Update Messages Cache
       queryClient.setQueryData<Message[]>(["messages", message.chat], (old) => {
-        const existing = old || [];
-        // Prevent duplicates
-        if (existing.some((m) => m._id === message._id)) return existing;
-        // Remove optimistic message and add real one
-        return [...existing.filter((m) => !m._id.startsWith("temp-")), message];
+        if (!old) return [message];
+        const filtered = old.filter((m) => !m._id.startsWith("temp-"));
+        if (filtered.some((m) => m._id === message._id)) return filtered;
+        return [...filtered, message];
       });
 
-      // 2. Update Chat List Preview
+      // Update Chat List Preview
       queryClient.setQueryData<Chat[]>(["chats"], (oldChats) => {
         return oldChats?.map((chat) => {
           if (chat._id === message.chat) {
@@ -110,7 +115,7 @@ export const useSocketStore = create<SocketState>((set, get) => ({
               lastMessage: {
                 _id: message._id,
                 text: message.text,
-                sender: (message.sender as MessageSender)._id,
+                sender: senderId,
                 createdAt: message.createdAt,
               },
               lastMessageAt: message.createdAt,
@@ -120,15 +125,14 @@ export const useSocketStore = create<SocketState>((set, get) => ({
         });
       });
 
-      // 3. Handle Unread Status
-      const senderId = (message.sender as MessageSender)._id;
+      // Handle Unread Status
       if (currentChatId !== message.chat) {
         set((state) => ({
           unreadChats: new Set([...state.unreadChats, message.chat]),
         }));
       }
 
-      // 4. Clear Typing
+      // Clear Typing
       set((state) => {
         const typingUsers = new Map(state.typingUsers);
         typingUsers.delete(message.chat);
@@ -136,31 +140,20 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       });
     });
 
-    socket.on(
-      "typing",
-      ({
-        userId,
-        chatId,
-        isTyping,
-      }: {
-        userId: string;
-        chatId: string;
-        isTyping: boolean;
-      }) => {
-        set((state) => {
-          const typingUsers = new Map(state.typingUsers);
-          if (isTyping) typingUsers.set(chatId, userId);
-          else typingUsers.delete(chatId);
-          return { typingUsers };
-        });
-      },
-    );
+    socket.on("typing", ({ userId, chatId, isTyping }) => {
+      set((state) => {
+        const typingUsers = new Map(state.typingUsers);
+        if (isTyping) typingUsers.set(chatId, userId);
+        else typingUsers.delete(chatId);
+        return { typingUsers };
+      });
+    });
 
     set({ socket, queryClient });
   },
 
   disconnect: () => {
-    const { socket } = get();
+    const socket = get().socket;
     if (socket) {
       socket.disconnect();
       set({
@@ -176,32 +169,24 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   },
 
   joinChat: (chatId) => {
-    const { socket } = get();
+    const socket = get().socket;
     set((state) => {
       const unreadChats = new Set(state.unreadChats);
       unreadChats.delete(chatId);
       return { currentChatId: chatId, unreadChats };
     });
-
-    if (socket?.connected) {
-      socket.emit("join-chat", chatId);
-    }
+    if (socket?.connected) socket.emit("join-chat", chatId);
   },
 
   leaveChat: (chatId) => {
     const { socket } = get();
     set({ currentChatId: null });
-    if (socket?.connected) {
-      socket.emit("leave-chat", chatId);
-    }
+    if (socket?.connected) socket.emit("leave-chat", chatId);
   },
 
   sendMessage: (chatId, text, currentUser) => {
     const { socket, queryClient } = get();
-    if (!socket?.connected || !queryClient) {
-      console.warn("Cannot send message: Socket not connected");
-      return;
-    }
+    if (!socket?.connected || !queryClient) return;
 
     const tempId = `temp-${Date.now()}`;
     const optimisticMessage: Message = {
@@ -213,9 +198,9 @@ export const useSocketStore = create<SocketState>((set, get) => ({
       updatedAt: new Date().toISOString(),
     };
 
-    // Push optimistic message to UI immediately
     queryClient.setQueryData<Message[]>(["messages", chatId], (old) => {
-      return [...(old || []), optimisticMessage];
+      if (!old) return [optimisticMessage];
+      return [...old, optimisticMessage];
     });
 
     socket.emit("send-message", { chatId, text });
@@ -223,8 +208,6 @@ export const useSocketStore = create<SocketState>((set, get) => ({
 
   sendTyping: (chatId, isTyping) => {
     const { socket } = get();
-    if (socket?.connected) {
-      socket.emit("typing", { chatId, isTyping });
-    }
+    if (socket?.connected) socket.emit("typing", { chatId, isTyping });
   },
 }));
