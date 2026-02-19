@@ -17,6 +17,10 @@ app.use("/api/chats", chatRoutes);
 app.use("/api/messages", meassageRoutes);
 app.use("/api/users", userRoutes);
 
+app.get("/health", (req, res) => {
+  res.status(200).send("ok");
+});
+
 app.use(errorHandler);
 
 if (process.env.NODE_ENV === "production") {

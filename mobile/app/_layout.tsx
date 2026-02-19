@@ -6,6 +6,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import AuthSync from "@/components/AuthSync";
 import { StatusBar } from "expo-status-bar";
 import * as Sentry from '@sentry/react-native';
+import { yearsToQuarters } from "date-fns";
+import SocketConnection from "@/components/SocketConnection";
 
 Sentry.init({
   dsn: 'https://3b86c2de9fc0082109a62642c3485b78@o4510900682752000.ingest.us.sentry.io/4510900686946304',
@@ -33,10 +35,19 @@ export default Sentry.wrap(function RootLayout() {
     <ClerkProvider tokenCache={tokenCache}>
       <QueryClientProvider client={queryClient}>
         <AuthSync />
+        <SocketConnection />
         <StatusBar style="light" />
         <Stack screenOptions={{headerShown: false, contentStyle: {backgroundColor: "#0D0D0F"}}}>
           <Stack.Screen name="(auth)" options={{animation: "fade"}} />
           <Stack.Screen name="(tabs)" options={{animation: "fade"}} />
+          <Stack.Screen 
+            name="new-chat" 
+            options={{
+              animation: 
+              "slide_from_bottom",
+              presentation:"modal",
+              gestureEnabled: true
+              }} />
           </Stack>
       </QueryClientProvider>
     </ClerkProvider>
